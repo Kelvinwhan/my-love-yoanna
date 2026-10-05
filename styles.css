@@ -72,18 +72,11 @@ a {
 }
 
 .brand-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--green);
-  color: white;
-}
-
-.brand-mark svg {
-  width: 27px;
-  height: 27px;
+  display: block;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: contain;
 }
 
 .brand-name {

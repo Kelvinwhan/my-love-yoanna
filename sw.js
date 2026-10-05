@@ -1,13 +1,12 @@
-const CACHE_NAME = "my-love-yoanna-shell-v9";
+const CACHE_NAME = "my-love-yoanna-shell-v10";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=location-4",
+  "./styles.css?v=location-5",
   "./app.js?v=location-4",
   "./manifest.webmanifest",
-  "./app-icon.svg",
-  "./app-icon-192.png",
-  "./app-icon-512.png"
+  "./app-icon-192.png?v=logo-1",
+  "./app-icon-512.png?v=logo-1"
 ];
 
 self.addEventListener("install", (event) => {
