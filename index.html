@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f5f7f4">
+    <meta name="description" content="Hong Kong weather forecasts and live KMB bus arrivals at Shek Mun.">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./app-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <title>My Love, Yoanna — Hong Kong Weather &amp; Bus</title>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="My Love, Yoanna home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" fill="none">
+              <path d="M7 25.5c4-5 8-5 12 0s8 5 14 0" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+              <path d="M7 31.5c4-5 8-5 12 0s8 5 14 0" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity=".56"/>
+              <path d="M20 5.5v12m0-12 5 5m-5-5-5 5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="brand-name">My Love, Yoanna</span>
+        </a>
+        <div class="topbar-right">
+          <span class="live-label"><span class="live-dot"></span> Live data</span>
+          <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh weather and bus arrivals" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 7v5h-5M4.7 9A7.5 7.5 0 0 1 18 6.7L20 12M4 17v-5h5m10.3 3A7.5 7.5 0 0 1 6 17.3L4 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="weather-section" aria-labelledby="weather-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span class="section-number">01</span> THE DAY AHEAD</p>
+              <h1 id="weather-heading">Hong Kong, <span class="heading-muted">in the open air.</span></h1>
+              <p class="section-intro">A little look at the weather, before you head out.</p>
+            </div>
+            <span class="update-label" id="weather-updated">Checking the skies…</span>
+          </div>
+
+          <div class="weather-overview">
+            <div class="current-weather">
+              <div class="current-copy">
+                <p class="eyebrow eyebrow-light">RIGHT NOW <span class="current-place">· HONG KONG</span></p>
+                <div class="current-temperature"><span id="current-temperature">--</span><sup>°C</sup></div>
+                <p class="current-condition" id="current-condition">Getting the latest conditions…</p>
+              </div>
+              <div class="current-sky" id="current-sky" aria-hidden="true">◌</div>
+              <div class="current-stats">
+                <div class="current-stat">
+                  <span class="stat-icon" aria-hidden="true">⌁</span>
+                  <span class="stat-copy"><span class="stat-label">Humidity</span><strong id="current-humidity">--</strong></span>
+                </div>
+                <div class="current-stat">
+                  <span class="stat-icon wind-icon" aria-hidden="true">↗</span>
+                  <span class="stat-copy"><span class="stat-label">Next-day wind</span><strong id="current-wind">--</strong></span>
+                </div>
+              </div>
+            </div>
+            <div class="weather-note">
+              <span class="note-symbol" aria-hidden="true">✳</span>
+              <p id="weather-summary">Hong Kong Observatory forecast will appear here.</p>
+              <span class="note-caption">THE LATEST OUTLOOK</span>
+            </div>
+          </div>
+
+          <div class="forecast-heading">
+            <div>
+              <p class="eyebrow">PLAN A LITTLE AHEAD</p>
+              <h2>Seven-day forecast<span class="heading-period">.</span></h2>
+            </div>
+            <span class="forecast-legend"><span class="legend-dot"></span> Daytime high / overnight low (°C)</span>
+          </div>
+          <div class="forecast-grid" id="forecast-grid" aria-live="polite">
+            <p class="loading-message">Fetching the seven-day forecast…</p>
+          </div>
+          <p class="section-error" id="weather-error" role="alert" hidden></p>
+          <p class="source-note">Weather data from the <a href="https://data.gov.hk/en-data/dataset/hk-hko-rss-current-weather-report" target="_blank" rel="noreferrer">Hong Kong Observatory</a>. Forecast wind speeds are approximate ranges converted from HKO Beaufort-force forecasts.</p>
+        </section>
+
+        <section class="bus-section" aria-labelledby="bus-heading">
+          <div class="bus-topline">
+            <div class="section-heading bus-title">
+              <div>
+                <p class="eyebrow"><span class="section-number">02</span> THE WAY THERE</p>
+                <h2 id="bus-heading">Your bus, <span class="heading-muted">right on time.</span></h2>
+                <p class="section-intro">Live KMB arrivals at your stop in Shek Mun.</p>
+              </div>
+            </div>
+            <span class="bus-route-badge"><span class="bus-badge-icon" aria-hidden="true">↗</span> KMB · <span id="selected-route-label">680</span></span>
+          </div>
+
+          <form class="route-search" id="route-form">
+            <label class="route-input-wrap" for="route-input">
+              <span class="route-input-label">BUS ROUTE</span>
+              <input id="route-input" name="route" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="8" value="680" aria-describedby="stop-hint">
+            </label>
+            <div class="stop-chip" id="stop-hint">
+              <span class="stop-pin" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M16 8.2c0 4.1-6 9.3-6 9.3S4 12.3 4 8.2a6 6 0 1 1 12 0Z" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/></svg>
+              </span>
+              <span><span class="chip-label">YOUR STOP</span><strong>石門 <span class="stop-english">Shek Mun</span></strong></span>
+            </div>
+            <button class="search-button" type="submit"><span>Find bus</span><span aria-hidden="true">→</span></button>
+          </form>
+          <p class="form-hint">Enter a KMB route number to find its next arrivals at stops matching 石門.</p>
+
+          <div class="bus-results" id="bus-results" aria-live="polite">
+            <div class="bus-loading">
+              <span class="loading-line"></span>
+              <p>Finding route 680 at Shek Mun…</p>
+            </div>
+          </div>
+          <p class="section-error bus-error" id="bus-error" role="alert" hidden></p>
+          <p class="source-note">Live arrival data from the <a href="https://data.gov.hk/en-data/dataset/hk-td-tis_21-etakmb" target="_blank" rel="noreferrer">Transport Department / KMB</a>.</p>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>MADE FOR MOVING THROUGH HONG KONG</span>
+        <span>Weather and arrivals, in one place <span class="footer-star">✳</span></span>
+      </footer>
+    </div>
+  </body>
+</html>
