@@ -258,6 +258,14 @@ h1 {
   line-height: 1;
 }
 
+.current-temperature.temperature-warm {
+  color: #f1c0b5;
+}
+
+.current-temperature.temperature-cool {
+  color: #b9d9ec;
+}
+
 .current-temperature sup {
   position: relative;
   top: -1.15em;
@@ -466,6 +474,16 @@ h1 {
 .forecast-low {
   color: #9baaa3;
   font-weight: 500;
+}
+
+.forecast-high.temperature-warm,
+.forecast-low.temperature-warm {
+  color: #d98278;
+}
+
+.forecast-high.temperature-cool,
+.forecast-low.temperature-cool {
+  color: #6f9fbe;
 }
 
 .forecast-wind {
@@ -682,6 +700,145 @@ h1 {
   margin: 8px 0 0;
   color: #9aa69f;
   font-size: 10px;
+}
+
+.stop-picker {
+  position: relative;
+  margin-top: 17px;
+  padding: 15px;
+  border: 1px solid #e2e8e3;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .66);
+}
+
+.stop-search-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #829188;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .13em;
+}
+
+.stop-search-row {
+  display: flex;
+  gap: 9px;
+}
+
+.stop-search-row input {
+  min-width: 0;
+  min-height: 42px;
+  flex: 1;
+  padding: 0 12px;
+  border: 1px solid #e3e9e4;
+  border-radius: 9px;
+  outline: 0;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.stop-search-row input:focus {
+  border-color: #85aa94;
+  box-shadow: 0 0 0 3px rgba(92, 144, 112, .11);
+}
+
+.location-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid #dce8df;
+  border-radius: 9px;
+  background: #edf4ef;
+  color: #47715e;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.location-button span {
+  color: #d67b5e;
+  font-size: 18px;
+}
+
+.location-button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.stop-picker .form-hint {
+  margin-top: 7px;
+}
+
+.selected-stop,
+.location-status {
+  margin: 8px 0 0;
+  color: #62806e;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.location-status {
+  color: #a54c36;
+}
+
+.location-status.location-success {
+  color: #62806e;
+}
+
+.stop-suggestions {
+  position: absolute;
+  top: calc(100% - 35px);
+  right: 15px;
+  left: 15px;
+  z-index: 5;
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid #dfe7e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(27, 61, 48, .14);
+}
+
+.stop-suggestion {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.stop-suggestion:hover,
+.stop-suggestion[aria-selected="true"] {
+  background: #edf4ef;
+}
+
+.suggestion-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.suggestion-detail {
+  color: #899990;
+  font-size: 9px;
+}
+
+.suggestion-empty {
+  margin: 0;
+  padding: 11px;
+  color: #899990;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .bus-results {
@@ -1046,6 +1203,23 @@ h1 {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px;
     margin-top: 18px;
+  }
+
+  .stop-picker {
+    padding: 12px;
+  }
+
+  .stop-search-row {
+    flex-direction: column;
+  }
+
+  .location-button {
+    width: 100%;
+  }
+
+  .stop-suggestions {
+    right: 12px;
+    left: 12px;
   }
 
   .route-input-wrap {

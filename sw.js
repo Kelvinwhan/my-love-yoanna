@@ -1,9 +1,9 @@
-const CACHE_NAME = "my-love-yoanna-shell-v5";
+const CACHE_NAME = "my-love-yoanna-shell-v9";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=citybus-1",
-  "./app.js?v=citybus-1",
+  "./styles.css?v=location-4",
+  "./app.js?v=location-4",
   "./manifest.webmanifest",
   "./app-icon.svg",
   "./app-icon-192.png",

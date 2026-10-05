@@ -1,6 +1,6 @@
 # My Love, Yoanna
 
-My Love, Yoanna is an installable Android-friendly web app with Hong Kong Observatory weather and live KMB and Citybus arrivals at stops matching **石門 (Shek Mun)**. The default bus route is **680**.
+My Love, Yoanna is an installable Android-friendly web app with Hong Kong Observatory weather and live KMB and Citybus arrivals. The default bus route is **680** and the default bus stop is **石門 (Shek Mun)**.
 
 ## Run locally
 
@@ -21,4 +21,6 @@ Open `http://localhost:8000` on that computer, or open `http://<computer-LAN-add
 
 Forecast wind direction and Beaufort force come directly from the Observatory. The displayed km/h values are approximate ranges corresponding to the forecast Beaufort force, not separate measured wind-speed readings. The [daily mean wind-speed dataset](https://data.gov.hk/en-data/dataset/hk-hko-rss-daily-mean-wind-speed) contains observations rather than forward forecasts, so it is not used to fill future days.
 
-Bus arrivals show **九巴** and **城巴** side by side. A `--` means that the operator has no upcoming ETA reported for that route and stop. Citybus stops are matched to the Shek Mun stops by stop name or location.
+Bus arrivals show **九巴** and **城巴** side by side. Choose a route stop by searching its name, or use the phone's location to select the nearest stop served by that route. Typing filters stop choices using partial and fuzzy name matches; if location permission is unavailable, the searchable stop list remains available. A `--` means that the operator has no upcoming ETA reported for that route and stop. Nearby operator stops are paired by location.
+
+Current temperature and forecast highs above 30°C are highlighted light red; readings below 25°C are highlighted light blue.

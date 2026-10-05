@@ -32,6 +32,11 @@ const elements = {
   routeForm: document.querySelector("#route-form"),
   routeInput: document.querySelector("#route-input"),
   selectedRouteLabel: document.querySelector("#selected-route-label"),
+  stopSearch: document.querySelector("#stop-search"),
+  stopSuggestions: document.querySelector("#stop-suggestions"),
+  selectedStopLabel: document.querySelector("#selected-stop-label"),
+  locationStatus: document.querySelector("#location-status"),
+  useLocationButton: document.querySelector("#use-location-button"),
   busResults: document.querySelector("#bus-results"),
   busError: document.querySelector("#bus-error"),
   searchButton: document.querySelector(".search-button"),
@@ -40,6 +45,10 @@ const elements = {
 
 let stopsByIdPromise;
 const citybusStopsById = new Map();
+let currentStopChoices = [];
+let selectedStopKey = null;
+let currentRoute = DEFAULT_ROUTE;
+let searchGeneration = 0;
 
 async function fetchJson(url) {
   const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -110,6 +119,13 @@ function describeWind(wind) {
   };
 }
 
+function temperatureClass(value) {
+  const temperature = Number(value);
+  if (temperature > 30) return "temperature-warm";
+  if (temperature < 25) return "temperature-cool";
+  return "";
+}
+
 function compactWindDirection(direction) {
   return direction.replace(/\bnorth\b/gi, "N")
     .replace(/\bsouth\b/gi, "S")
@@ -144,11 +160,11 @@ function renderForecast(forecasts) {
     temperatures.className = "forecast-temperatures";
 
     const high = document.createElement("span");
-    high.className = "forecast-high";
+    high.className = `forecast-high ${temperatureClass(day.forecastMaxtemp.value)}`;
     high.textContent = `${day.forecastMaxtemp.value}°`;
 
     const low = document.createElement("span");
-    low.className = "forecast-low";
+    low.className = `forecast-low ${temperatureClass(day.forecastMintemp.value)}`;
     low.textContent = `${day.forecastMintemp.value}°`;
     temperatures.append(high, low);
 
@@ -186,6 +202,7 @@ async function loadWeather() {
     }
 
     elements.currentTemperature.textContent = observatory.value;
+    elements.currentTemperature.className = temperatureClass(observatory.value);
     elements.currentCondition.textContent = `Hong Kong Observatory · ${formatObservationTime(current.updateTime)} HKT`;
     elements.currentSky.textContent = currentWeatherSymbol(current.icon?.[0]);
     elements.currentHumidity.textContent = humidity ? `${humidity.value}%` : "Unavailable";
@@ -338,16 +355,241 @@ function makeBusCard(row, route) {
   return card;
 }
 
-function setBusLoading(route) {
+function setBusLoading(route, stopName = "available stops") {
   const loading = document.createElement("div");
   loading.className = "bus-loading";
   const spinner = document.createElement("span");
   spinner.className = "loading-line";
   spinner.setAttribute("aria-hidden", "true");
   const text = document.createElement("p");
-  text.textContent = `Finding route ${route} at Shek Mun…`;
+  text.textContent = `Finding route ${route} at ${stopName}…`;
   loading.append(spinner, text);
   elements.busResults.replaceChildren(loading);
+}
+
+function createStopChoices(kmbGroups, citybusGroups) {
+  const choices = [];
+  const matchedCitybus = new Set();
+
+  [...kmbGroups.values()].forEach((group) => {
+    const possibleMatches = [...citybusGroups.values()]
+      .filter((candidate) => candidate.bound === group.bound && !matchedCitybus.has(candidate))
+      .map((candidate) => ({
+        candidate,
+        distance: distanceBetweenStops(group.stop, candidate.stop),
+        destinationMatches: normalizeDestination(group.route.dest_tc)
+          === normalizeDestination(candidate.destinationTc)
+      }))
+      .filter((match) => match.distance <= 150)
+      .sort((first, second) =>
+        Number(second.destinationMatches) - Number(first.destinationMatches) || first.distance - second.distance
+      );
+    const matched = possibleMatches.find((match) => match.destinationMatches)?.candidate
+      || (possibleMatches.length === 1 ? possibleMatches[0].candidate : null);
+    if (matched) matchedCitybus.add(matched);
+    choices.push({
+      key: `kmb:${group.bound}:${group.stop.stop}`,
+      stop: group.stop,
+      bound: group.bound,
+      kmb: { group },
+      citybus: matched ? { group: matched } : null
+    });
+  });
+
+  [...citybusGroups.values()].forEach((group) => {
+    if (matchedCitybus.has(group)) return;
+    choices.push({
+      key: `ctb:${group.bound}:${group.stop.stop}`,
+      stop: group.stop,
+      bound: group.bound,
+      kmb: null,
+      citybus: { group }
+    });
+  });
+
+  return choices.sort((first, second) =>
+    (first.bound === "O" ? 0 : 1) - (second.bound === "O" ? 0 : 1)
+      || first.stop.name_tc.localeCompare(second.stop.name_tc)
+  );
+}
+
+function stopChoiceLabel(choice) {
+  const operators = [
+    choice.kmb ? "九巴" : "",
+    choice.citybus ? "城巴" : ""
+  ].filter(Boolean).join("、");
+  return `${choice.stop.name_tc} · ${directionLabel(choice.bound)} · ${operators}`;
+}
+
+function editDistance(first, second) {
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= first.length; row += 1) {
+    let diagonal = previous[0];
+    previous[0] = row;
+    for (let column = 1; column <= second.length; column += 1) {
+      const above = previous[column];
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + (first[row - 1] === second[column - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[second.length];
+}
+
+function fuzzyStopScore(choice, query, queryWordCount) {
+  const normalize = (name) => name.toLowerCase().replace(/[\s，,、\-()（）]/g, "");
+  const parts = [choice.stop.name_tc, choice.stop.name_en || ""]
+    .flatMap((name) => name.toLowerCase().split(/[\s，,、\-()（）]+/))
+    .filter(Boolean)
+    .map(normalize);
+  const searchable = [normalize(choice.stop.name_tc), normalize(choice.stop.name_en || "")];
+  if (searchable.some((name) => name.includes(query))) return 0;
+
+  const candidates = [...parts];
+  const maxWindow = Math.min(4, queryWordCount + 1);
+  for (let windowSize = 2; windowSize <= maxWindow; windowSize += 1) {
+    for (let index = 0; index <= parts.length - windowSize; index += 1) {
+      candidates.push(parts.slice(index, index + windowSize).join(""));
+    }
+  }
+  return Math.min(...candidates.map((name) => editDistance(name, query)));
+}
+
+function renderStopSuggestions(query = "") {
+  const normalizedQuery = query.toLowerCase().trim().replace(/[\s，,、\-()（）]/g, "");
+  const queryWordCount = query.trim().split(/[\s，,、\-()（）]+/).filter(Boolean).length;
+  const ranked = currentStopChoices.map((choice) => ({
+    choice,
+    score: normalizedQuery ? fuzzyStopScore(choice, normalizedQuery, queryWordCount) : 0
+  })).filter(({ score }) =>
+    !normalizedQuery || score === 0 || score <= Math.max(1, Math.floor(normalizedQuery.length * .35))
+  ).sort((first, second) =>
+    first.score - second.score || first.choice.stop.name_tc.localeCompare(second.choice.stop.name_tc)
+  ).slice(0, 8);
+
+  elements.stopSuggestions.replaceChildren();
+  if (!ranked.length) {
+    const empty = document.createElement("p");
+    empty.className = "suggestion-empty";
+    empty.textContent = "No close matches. Clear your search to browse the available stops.";
+    elements.stopSuggestions.append(empty);
+    elements.stopSuggestions.hidden = false;
+    return;
+  }
+
+  ranked.forEach(({ choice }) => {
+    const option = document.createElement("button");
+    option.className = "stop-suggestion";
+    option.type = "button";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(choice.key === selectedStopKey));
+
+    const name = document.createElement("span");
+    name.className = "suggestion-name";
+    name.textContent = choice.stop.name_tc;
+
+    const detail = document.createElement("span");
+    detail.className = "suggestion-detail";
+    detail.textContent = `${choice.stop.name_en || ""} · ${directionLabel(choice.bound)} · ${choice.kmb ? "九巴" : ""}${choice.kmb && choice.citybus ? " / " : ""}${choice.citybus ? "城巴" : ""}`;
+
+    option.append(name, detail);
+    option.addEventListener("click", () => chooseStop(choice));
+    elements.stopSuggestions.append(option);
+  });
+  elements.stopSuggestions.hidden = false;
+}
+
+function chooseStop(choice) {
+  selectedStopKey = choice.key;
+  elements.stopSearch.value = choice.stop.name_tc;
+  elements.selectedStopLabel.textContent = `Selected: ${stopChoiceLabel(choice)}`;
+  elements.stopSuggestions.hidden = true;
+  setError(elements.locationStatus, "");
+  loadSelectedStop(currentRoute, choice);
+  try {
+    localStorage.setItem("harbour-stop", choice.key);
+  } catch (error) {
+    console.warn("The selected bus stop could not be saved.", error);
+  }
+}
+
+function selectDefaultStop() {
+  const storedKey = localStorage.getItem("harbour-stop");
+  const preferred = currentStopChoices.find((choice) => choice.key === storedKey);
+  const defaultShekMun = currentStopChoices.find((choice) =>
+    choice.bound === "O" && choice.stop.name_tc.includes(DEFAULT_STOP)
+  ) || currentStopChoices.find((choice) => choice.stop.name_tc.includes(DEFAULT_STOP));
+  const choice = preferred || defaultShekMun || currentStopChoices[0];
+
+  if (choice) {
+    selectedStopKey = choice.key;
+    elements.stopSearch.value = choice.stop.name_tc;
+    elements.selectedStopLabel.textContent = preferred
+      ? `Selected: ${stopChoiceLabel(choice)}`
+      : defaultShekMun
+        ? `Default stop: ${stopChoiceLabel(choice)}`
+        : `No 石門 stop on this route. Showing ${stopChoiceLabel(choice)}.`;
+    elements.stopSuggestions.hidden = true;
+    loadSelectedStop(currentRoute, choice);
+    return;
+  }
+
+  selectedStopKey = null;
+  elements.stopSearch.value = "";
+  elements.selectedStopLabel.textContent = "No stops were found for this route.";
+  elements.busResults.replaceChildren();
+}
+
+async function useCurrentLocation() {
+  setError(elements.locationStatus, "");
+  if (!navigator.geolocation) {
+    setError(elements.locationStatus, "Location is not available in this browser. You can still search for or choose a stop.");
+    return;
+  }
+
+  elements.useLocationButton.disabled = true;
+  elements.useLocationButton.textContent = "Finding nearest stop…";
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        maximumAge: 60000,
+        timeout: 15000
+      });
+    });
+    if (!currentStopChoices.length) {
+      throw new Error("No stops are available for this route yet.");
+    }
+
+    const location = { lat: position.coords.latitude, long: position.coords.longitude };
+    const nearest = currentStopChoices.reduce((best, choice) => {
+      const distance = distanceBetweenStops(location, choice.stop);
+      return distance < best.distance ? { choice, distance } : best;
+    }, { choice: currentStopChoices[0], distance: Infinity });
+    chooseStop(nearest.choice);
+    elements.locationStatus.textContent = `Nearest stop: ${nearest.choice.stop.name_tc} (${formatDistance(nearest.distance)} away).`;
+    elements.locationStatus.classList.add("location-success");
+    elements.locationStatus.hidden = false;
+  } catch (error) {
+    const message = error.code === 1
+      ? "Location permission was denied. You can still search for or choose a stop."
+      : error.code === 3
+        ? "Your location could not be determined in time. You can still search for or choose a stop."
+        : `Could not find the nearest stop: ${error.message} You can still choose a stop below.`;
+    setError(elements.locationStatus, message);
+    elements.locationStatus.classList.remove("location-success");
+    renderStopSuggestions(elements.stopSearch.value);
+  } finally {
+    elements.useLocationButton.disabled = false;
+    elements.useLocationButton.innerHTML = '<span aria-hidden="true">⌖</span> Use my location';
+  }
+}
+
+function formatDistance(metres) {
+  return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`;
 }
 
 async function loadBus(routeValue) {
@@ -360,6 +602,8 @@ async function loadBus(routeValue) {
     return;
   }
 
+  const generation = ++searchGeneration;
+  currentRoute = route;
   elements.searchButton.disabled = true;
   setBusLoading(route);
   const issues = [];
@@ -376,13 +620,10 @@ async function loadBus(routeValue) {
       issues.push(`城巴 route data: ${citybusRoutesResult.reason.message}`);
     }
     if (allStopsResult.status === "rejected") {
-      throw new Error(`Shek Mun stop data could not be loaded: ${allStopsResult.reason.message}`);
+      issues.push(`九巴 stop data: ${allStopsResult.reason.message}`);
     }
 
-    const allStops = allStopsResult.value;
-    const shekMunStops = [...allStops.values()].filter((stop) =>
-      stop.name_tc.includes(DEFAULT_STOP) || stop.name_en.toLowerCase().includes("shek mun")
-    );
+    const allStops = allStopsResult.status === "fulfilled" ? allStopsResult.value : new Map();
     const kmbVariants = kmbRoutesResult.status === "fulfilled"
       ? kmbRoutesResult.value.data.filter((item) => item.route.toUpperCase() === route)
       : [];
@@ -411,7 +652,7 @@ async function loadBus(routeValue) {
     kmbRouteStops.forEach(({ variant, stops, error }) => {
       stops.forEach((routeStop) => {
         const stop = allStops.get(routeStop.stop);
-        if (!stop || !(stop.name_tc.includes(DEFAULT_STOP) || stop.name_en.toLowerCase().includes("shek mun"))) return;
+        if (!stop) return;
         const key = `${variant.bound}:${routeStop.stop}`;
         if (!kmbGroups.has(key)) {
           kmbGroups.set(key, { stop, bound: variant.bound, route: variant, serviceTypes: [], error });
@@ -465,7 +706,7 @@ async function loadBus(routeValue) {
     citybusRouteStops.forEach(({ variant, bound, destinationTc, stops }) => {
       stops.forEach((routeStop) => {
         const stop = citybusStops.get(routeStop.stop);
-        if (!stop || !isNearShekMun(stop, shekMunStops)) return;
+        if (!stop) return;
         const key = `${bound}:${routeStop.stop}`;
         if (!citybusGroups.has(key)) {
           citybusGroups.set(key, { stop, bound, destinationTc, route: variant });
@@ -473,91 +714,78 @@ async function loadBus(routeValue) {
       });
     });
 
-    const [kmbArrivals, citybusArrivals] = await Promise.all([
-      Promise.all([...kmbGroups.values()].map(async (group) => {
-        const results = await Promise.allSettled(group.serviceTypes.map((serviceType) =>
-          fetchJson(`${KMB_API}/eta/${encodeURIComponent(group.stop.stop)}/${encodeURIComponent(route)}/${encodeURIComponent(serviceType)}`)
-        ));
-        const successful = results.filter((result) => result.status === "fulfilled")
-          .flatMap((result) => result.value.data || [])
-          .filter((eta) => eta.eta && eta.dir === group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
-          .sort((first, second) => new Date(first.eta) - new Date(second.eta));
-        const uniqueEtas = uniqueArrivalTimes(successful);
-        const failed = results.some((result) => result.status === "rejected");
-        if (failed) issues.push(`Some 九巴 ${route} arrival requests failed.`);
-        return { group, etas: uniqueEtas, error: failed ? "九巴 arrival data unavailable." : "" };
-      })),
-      Promise.all([...citybusGroups.values()].map(async (group) => {
-        try {
-          const response = await fetchJson(
-            `${CITYBUS_API}/eta/CTB/${encodeURIComponent(group.stop.stop)}/${encodeURIComponent(route)}`
-          );
-          const arrivals = (response.data || [])
-            .filter((eta) => eta.eta && eta.dir === group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
-            .sort((first, second) => new Date(first.eta) - new Date(second.eta));
-          return { group, etas: uniqueArrivalTimes(arrivals), error: "" };
-        } catch (error) {
-          issues.push(`城巴 ${route} arrival data: ${error.message}`);
-          return { group, etas: [], error: "城巴 arrival data unavailable." };
-        }
-      }))
-    ]);
-
-    const displayRows = [];
-    const usedCitybusGroups = new Set();
-    kmbArrivals.forEach((kmb) => {
-      const matches = citybusArrivals
-        .filter((citybus) => !usedCitybusGroups.has(citybus))
-        .map((citybus) => ({
-          citybus,
-          distance: distanceBetweenStops(kmb.group.stop, citybus.group.stop),
-          destinationMatches: normalizeDestination(kmb.group.route.dest_tc)
-            === normalizeDestination(citybus.group.destinationTc)
-        }))
-        .filter((match) => match.distance <= 120)
-        .sort((first, second) =>
-          Number(second.destinationMatches) - Number(first.destinationMatches) || first.distance - second.distance
-        );
-      const citybus = matches.find((match) => match.destinationMatches)?.citybus
-        || (matches.length === 1 ? matches[0].citybus : null);
-      if (citybus) usedCitybusGroups.add(citybus);
-      displayRows.push({
-        stop: kmb.group.stop,
-        kmb,
-        citybus
-      });
-    });
-    citybusArrivals.forEach((citybus) => {
-      if (!usedCitybusGroups.has(citybus)) {
-        displayRows.push({
-          stop: citybus.group.stop,
-          kmb: null,
-          citybus
-        });
-      }
-    });
-
-    if (!displayRows.length) {
-      displayRows.push({
-        stop: { name_tc: `${DEFAULT_STOP} / Shek Mun` },
-        kmb: null,
-        citybus: null
-      });
-      issues.push(`Route ${route} has no matching 石門 stop in either operator's route data.`);
+    if (generation !== searchGeneration) return;
+    currentStopChoices = createStopChoices(kmbGroups, citybusGroups);
+    setError(elements.busError, issues.length ? issues.join(" ") : "");
+    if (!currentStopChoices.length) {
+      elements.stopSuggestions.replaceChildren();
+      elements.stopSuggestions.hidden = true;
+      elements.selectedStopLabel.textContent = `No stops were found for route ${route}.`;
+      elements.busResults.replaceChildren();
+      if (!issues.length) setError(elements.busError, `Route ${route} has no available KMB or Citybus stops.`);
+      return;
     }
 
-    elements.busResults.replaceChildren();
-    displayRows.forEach((row) => {
-      elements.busResults.append(makeBusCard(row, route));
-    });
-    localStorage.setItem("harbour-route", route);
-    setError(elements.busError, issues.length ? issues.join(" ") : "");
+    elements.searchButton.disabled = false;
+    renderStopSuggestions(elements.stopSearch.value);
+    selectDefaultStop();
+    try {
+      localStorage.setItem("harbour-route", route);
+    } catch (error) {
+      console.warn("The selected bus route could not be saved.", error);
+    }
   } catch (error) {
     elements.busResults.replaceChildren();
     setError(elements.busError, `Bus arrivals could not be loaded: ${error.message}`);
   } finally {
-    elements.searchButton.disabled = false;
+    if (generation === searchGeneration) elements.searchButton.disabled = false;
   }
+}
+
+async function loadSelectedStop(route, choice) {
+  const generation = ++searchGeneration;
+  setBusLoading(route, choice.stop.name_tc);
+  const [kmbResult, citybusResult] = await Promise.all([
+    choice.kmb
+      ? Promise.allSettled(choice.kmb.group.serviceTypes.map((serviceType) =>
+        fetchJson(`${KMB_API}/eta/${encodeURIComponent(choice.kmb.group.stop.stop)}/${encodeURIComponent(route)}/${encodeURIComponent(serviceType)}`)
+      ))
+      : Promise.resolve([]),
+    choice.citybus
+      ? fetchJson(`${CITYBUS_API}/eta/CTB/${encodeURIComponent(choice.citybus.group.stop.stop)}/${encodeURIComponent(route)}`)
+        .then((response) => ({ status: "fulfilled", value: response }))
+        .catch((reason) => ({ status: "rejected", reason }))
+      : Promise.resolve(null)
+  ]);
+  if (generation !== searchGeneration) return;
+
+  const kmbEtas = Array.isArray(kmbResult)
+    ? kmbResult.filter((result) => result.status === "fulfilled")
+      .flatMap((result) => result.value.data || [])
+      .filter((eta) => eta.eta && eta.dir === choice.kmb.group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
+      .sort((first, second) => new Date(first.eta) - new Date(second.eta))
+    : [];
+  const kmbFailed = Array.isArray(kmbResult) && kmbResult.length > 0
+    && kmbResult.every((result) => result.status === "rejected");
+  const citybusEtas = citybusResult?.status === "fulfilled"
+    ? (citybusResult.value.data || [])
+      .filter((eta) => eta.eta && eta.dir === choice.citybus.group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
+      .sort((first, second) => new Date(first.eta) - new Date(second.eta))
+    : [];
+  const row = {
+    stop: choice.stop,
+    kmb: choice.kmb ? {
+      group: choice.kmb.group,
+      etas: uniqueArrivalTimes(kmbEtas),
+      error: kmbFailed ? "九巴 arrival data unavailable." : ""
+    } : null,
+    citybus: choice.citybus ? {
+      group: choice.citybus.group,
+      etas: uniqueArrivalTimes(citybusEtas),
+      error: citybusResult?.status === "rejected" ? "城巴 arrival data unavailable." : ""
+    } : null
+  };
+  elements.busResults.replaceChildren(makeBusCard(row, route));
 }
 
 async function getCitybusStop(stopId) {
@@ -596,11 +824,6 @@ function distanceBetweenStops(first, second) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
-function isNearShekMun(stop, shekMunStops) {
-  if (stop.name_tc?.includes(DEFAULT_STOP) || stop.name_en?.toLowerCase().includes("shek mun")) return true;
-  return shekMunStops.some((anchor) => distanceBetweenStops(stop, anchor) <= 150);
-}
-
 function normalizeDestination(destination) {
   return (destination || "").toLowerCase().replace(/station|站|[()（）\s-]/g, "");
 }
@@ -621,11 +844,34 @@ elements.routeForm.addEventListener("submit", (event) => {
   loadBus(elements.routeInput.value);
 });
 
+elements.stopSearch.addEventListener("input", () => {
+  renderStopSuggestions(elements.stopSearch.value);
+});
+
+elements.stopSearch.addEventListener("focus", () => {
+  renderStopSuggestions(elements.stopSearch.value);
+});
+
+elements.stopSearch.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !elements.stopSuggestions.hidden) {
+    const firstSuggestion = elements.stopSuggestions.querySelector(".stop-suggestion");
+    if (firstSuggestion) {
+      event.preventDefault();
+      firstSuggestion.click();
+    }
+  }
+  if (event.key === "Escape") elements.stopSuggestions.hidden = true;
+});
+
+elements.useLocationButton.addEventListener("click", useCurrentLocation);
+
 elements.refreshButton.addEventListener("click", refresh);
 
 const savedRoute = localStorage.getItem("harbour-route");
 elements.routeInput.value = savedRoute || DEFAULT_ROUTE;
 elements.selectedRouteLabel.textContent = elements.routeInput.value;
+elements.stopSearch.value = DEFAULT_STOP;
+elements.selectedStopLabel.textContent = `Default stop: ${DEFAULT_STOP}`;
 loadWeather();
 loadBus(elements.routeInput.value);
 
