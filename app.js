@@ -1,5 +1,6 @@
 const HKO_API = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php";
 const KMB_API = "https://data.etabus.gov.hk/v1/transport/kmb";
+const CITYBUS_API = "https://rt.data.gov.hk/v2/transport/citybus";
 const DEFAULT_ROUTE = "680";
 const DEFAULT_STOP = "石門";
 const WIND_SPEED_RANGES = [
@@ -38,6 +39,7 @@ const elements = {
 };
 
 let stopsByIdPromise;
+const citybusStopsById = new Map();
 
 async function fetchJson(url) {
   const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -264,49 +266,75 @@ function renderEtaRow(eta) {
   return row;
 }
 
-function makeBusCard(group, route, etas, etaError) {
+function makeOperatorColumn(label, result) {
+  const column = document.createElement("section");
+  column.className = "operator-column";
+
+  const heading = document.createElement("h3");
+  heading.className = "operator-heading";
+  heading.textContent = label;
+
+  const etaList = document.createElement("div");
+  etaList.className = "eta-list";
+  if (result?.etas.length) {
+    result.etas.forEach((eta) => etaList.append(renderEtaRow(eta)));
+  } else {
+    const empty = document.createElement("span");
+    empty.className = "no-eta-value";
+    empty.textContent = "--";
+    etaList.append(empty);
+  }
+
+  column.append(heading, etaList);
+  if (result?.error) {
+    const error = document.createElement("p");
+    error.className = "operator-error";
+    error.textContent = result.error;
+    column.append(error);
+  }
+  return column;
+}
+
+function makeBusCard(row, route) {
   const card = document.createElement("article");
   card.className = "bus-card";
 
   const header = document.createElement("div");
   header.className = "bus-card-heading";
   const stopDetails = document.createElement("div");
-
   const stopName = document.createElement("div");
   stopName.className = "bus-stop-name";
-  stopName.textContent = group.stop.name_tc;
-
+  stopName.textContent = row.stop.name_tc;
   const subtitle = document.createElement("div");
   subtitle.className = "bus-stop-subtitle";
-  subtitle.textContent = `${route.route} → ${route.dest_tc} · ${group.serviceTypes.map((type) => `Service ${type}`).join(", ")}`;
+  const service = row.kmb?.group.serviceTypes.map((type) => `Service ${type}`).join(", ");
+  const destination = row.kmb?.group.route.dest_tc || row.citybus?.group.destinationTc;
+  subtitle.textContent = `${route} → ${destination || "石門"}${service ? ` · ${service}` : ""}`;
 
   const tag = document.createElement("span");
   tag.className = "direction-tag";
-  tag.textContent = directionLabel(route.bound);
+  tag.textContent = row.kmb
+    ? directionLabel(row.kmb.group.bound)
+    : directionLabel(row.citybus.group.bound);
 
   stopDetails.append(stopName, subtitle);
   header.append(stopDetails, tag);
   card.append(header);
 
-  if (etaError) {
-    const message = document.createElement("p");
-    message.className = "no-eta";
-    message.textContent = `Arrival times could not be loaded: ${etaError}`;
-    card.append(message);
-    return card;
+  if (row.citybus && row.kmb && row.citybus.group.stop.name_tc !== row.kmb.group.stop.name_tc) {
+    const citybusStop = document.createElement("p");
+    citybusStop.className = "matched-stop-name";
+    citybusStop.textContent = `城巴站：${row.citybus.group.stop.name_tc}`;
+    card.append(citybusStop);
   }
 
-  const etaList = document.createElement("div");
-  etaList.className = "eta-list";
-  if (etas.length) {
-    etas.forEach((eta) => etaList.append(renderEtaRow(eta)));
-  } else {
-    const message = document.createElement("p");
-    message.className = "no-eta";
-    message.textContent = "No upcoming arrivals are currently reported for this stop.";
-    etaList.append(message);
-  }
-  card.append(etaList);
+  const columns = document.createElement("div");
+  columns.className = "operator-columns";
+  columns.append(
+    makeOperatorColumn("九巴", row.kmb),
+    makeOperatorColumn("城巴", row.citybus)
+  );
+  card.append(columns);
   return card;
 }
 
@@ -334,75 +362,253 @@ async function loadBus(routeValue) {
 
   elements.searchButton.disabled = true;
   setBusLoading(route);
+  const issues = [];
   try {
-    const routeList = await fetchJson(`${KMB_API}/route/`);
-    const routeVariants = routeList.data.filter((item) => item.route.toUpperCase() === route);
-    if (!routeVariants.length) {
-      throw new Error(`Route ${route} was not found in the KMB route list. Check the route number and try again.`);
+    const [kmbRoutesResult, citybusRoutesResult, allStopsResult] = await Promise.allSettled([
+      fetchJson(`${KMB_API}/route/`),
+      fetchJson(`${CITYBUS_API}/route/CTB`),
+      getStopsById()
+    ]);
+    if (kmbRoutesResult.status === "rejected") {
+      issues.push(`九巴 route data: ${kmbRoutesResult.reason.message}`);
+    }
+    if (citybusRoutesResult.status === "rejected") {
+      issues.push(`城巴 route data: ${citybusRoutesResult.reason.message}`);
+    }
+    if (allStopsResult.status === "rejected") {
+      throw new Error(`Shek Mun stop data could not be loaded: ${allStopsResult.reason.message}`);
     }
 
-    const variants = routeVariants.filter((item, index, all) =>
+    const allStops = allStopsResult.value;
+    const shekMunStops = [...allStops.values()].filter((stop) =>
+      stop.name_tc.includes(DEFAULT_STOP) || stop.name_en.toLowerCase().includes("shek mun")
+    );
+    const kmbVariants = kmbRoutesResult.status === "fulfilled"
+      ? kmbRoutesResult.value.data.filter((item) => item.route.toUpperCase() === route)
+      : [];
+    const citybusVariants = citybusRoutesResult.status === "fulfilled"
+      ? citybusRoutesResult.value.data.filter((item) => item.route.toUpperCase() === route)
+      : [];
+
+    const uniqueKmbVariants = kmbVariants.filter((item, index, all) =>
       all.findIndex((other) => other.bound === item.bound && other.service_type === item.service_type) === index
     );
-    const routeStops = await Promise.all(variants.map(async (variant) => {
+
+    const kmbRouteStops = await Promise.all(uniqueKmbVariants.map(async (variant) => {
       const direction = variant.bound === "O" ? "outbound" : "inbound";
-      const response = await fetchJson(
-        `${KMB_API}/route-stop/${encodeURIComponent(variant.route)}/${direction}/${encodeURIComponent(variant.service_type)}`
-      );
-      return { route: variant, stops: response.data };
+      try {
+        const response = await fetchJson(
+          `${KMB_API}/route-stop/${encodeURIComponent(variant.route)}/${direction}/${encodeURIComponent(variant.service_type)}`
+        );
+        return { variant, stops: response.data, error: "" };
+      } catch (error) {
+        issues.push(`九巴 ${variant.route} ${direction}: ${error.message}`);
+        return { variant, stops: [], error: error.message };
+      }
     }));
 
-    const allStops = await getStopsById();
-    const groups = new Map();
-    routeStops.forEach(({ route: variant, stops }) => {
+    const kmbGroups = new Map();
+    kmbRouteStops.forEach(({ variant, stops, error }) => {
       stops.forEach((routeStop) => {
         const stop = allStops.get(routeStop.stop);
         if (!stop || !(stop.name_tc.includes(DEFAULT_STOP) || stop.name_en.toLowerCase().includes("shek mun"))) return;
         const key = `${variant.bound}:${routeStop.stop}`;
-        if (!groups.has(key)) {
-          groups.set(key, { stop, bound: variant.bound, route: variant, serviceTypes: [] });
+        if (!kmbGroups.has(key)) {
+          kmbGroups.set(key, { stop, bound: variant.bound, route: variant, serviceTypes: [], error });
         }
-        const group = groups.get(key);
+        const group = kmbGroups.get(key);
         if (!group.serviceTypes.includes(variant.service_type)) {
           group.serviceTypes.push(variant.service_type);
         }
       });
     });
 
-    if (!groups.size) {
-      elements.busResults.replaceChildren();
-      setError(elements.busError, `No 石門 stop was found on route ${route}. Try another KMB route.`);
-      return;
+    const uniqueCitybusVariants = citybusVariants.filter((item, index, all) =>
+      all.findIndex((other) => other.orig_tc === item.orig_tc && other.dest_tc === item.dest_tc) === index
+    );
+    const citybusRouteStops = await Promise.all(uniqueCitybusVariants.flatMap((variant) =>
+      ["outbound", "inbound"].map(async (direction) => {
+        try {
+          const response = await fetchJson(
+            `${CITYBUS_API}/route-stop/CTB/${encodeURIComponent(route)}/${direction}`
+          );
+          const bound = direction === "outbound" ? "O" : "I";
+          const destinationTc = bound === "I" ? variant.orig_tc : variant.dest_tc;
+          return { variant, bound, destinationTc, stops: response.data };
+        } catch (error) {
+          issues.push(`城巴 ${route} ${direction}: ${error.message}`);
+          return { variant, bound: direction === "outbound" ? "O" : "I", destinationTc: "", stops: [], error: error.message };
+        }
+      })
+    ));
+
+    const uniqueCitybusStopIds = [...new Set(citybusRouteStops.flatMap((result) =>
+      result.stops.map((routeStop) => routeStop.stop)
+    ))];
+    const citybusStopResults = await mapWithConcurrency(uniqueCitybusStopIds, 8, async (stopId) => {
+      try {
+        const response = await getCitybusStop(stopId);
+        return { stopId, stop: response.data, error: "" };
+      } catch (error) {
+        return { stopId, stop: null, error: error.message };
+      }
+    });
+    const citybusStops = new Map();
+    citybusStopResults.forEach((result) => {
+      if (result.stop) {
+        citybusStops.set(result.stopId, result.stop);
+      } else {
+        issues.push(`城巴 stop ${result.stopId}: ${result.error}`);
+      }
+    });
+    const citybusGroups = new Map();
+    citybusRouteStops.forEach(({ variant, bound, destinationTc, stops }) => {
+      stops.forEach((routeStop) => {
+        const stop = citybusStops.get(routeStop.stop);
+        if (!stop || !isNearShekMun(stop, shekMunStops)) return;
+        const key = `${bound}:${routeStop.stop}`;
+        if (!citybusGroups.has(key)) {
+          citybusGroups.set(key, { stop, bound, destinationTc, route: variant });
+        }
+      });
+    });
+
+    const [kmbArrivals, citybusArrivals] = await Promise.all([
+      Promise.all([...kmbGroups.values()].map(async (group) => {
+        const results = await Promise.allSettled(group.serviceTypes.map((serviceType) =>
+          fetchJson(`${KMB_API}/eta/${encodeURIComponent(group.stop.stop)}/${encodeURIComponent(route)}/${encodeURIComponent(serviceType)}`)
+        ));
+        const successful = results.filter((result) => result.status === "fulfilled")
+          .flatMap((result) => result.value.data || [])
+          .filter((eta) => eta.eta && eta.dir === group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
+          .sort((first, second) => new Date(first.eta) - new Date(second.eta));
+        const uniqueEtas = uniqueArrivalTimes(successful);
+        const failed = results.some((result) => result.status === "rejected");
+        if (failed) issues.push(`Some 九巴 ${route} arrival requests failed.`);
+        return { group, etas: uniqueEtas, error: failed ? "九巴 arrival data unavailable." : "" };
+      })),
+      Promise.all([...citybusGroups.values()].map(async (group) => {
+        try {
+          const response = await fetchJson(
+            `${CITYBUS_API}/eta/CTB/${encodeURIComponent(group.stop.stop)}/${encodeURIComponent(route)}`
+          );
+          const arrivals = (response.data || [])
+            .filter((eta) => eta.eta && eta.dir === group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
+            .sort((first, second) => new Date(first.eta) - new Date(second.eta));
+          return { group, etas: uniqueArrivalTimes(arrivals), error: "" };
+        } catch (error) {
+          issues.push(`城巴 ${route} arrival data: ${error.message}`);
+          return { group, etas: [], error: "城巴 arrival data unavailable." };
+        }
+      }))
+    ]);
+
+    const displayRows = [];
+    const usedCitybusGroups = new Set();
+    kmbArrivals.forEach((kmb) => {
+      const matches = citybusArrivals
+        .filter((citybus) => !usedCitybusGroups.has(citybus))
+        .map((citybus) => ({
+          citybus,
+          distance: distanceBetweenStops(kmb.group.stop, citybus.group.stop),
+          destinationMatches: normalizeDestination(kmb.group.route.dest_tc)
+            === normalizeDestination(citybus.group.destinationTc)
+        }))
+        .filter((match) => match.distance <= 120)
+        .sort((first, second) =>
+          Number(second.destinationMatches) - Number(first.destinationMatches) || first.distance - second.distance
+        );
+      const citybus = matches.find((match) => match.destinationMatches)?.citybus
+        || (matches.length === 1 ? matches[0].citybus : null);
+      if (citybus) usedCitybusGroups.add(citybus);
+      displayRows.push({
+        stop: kmb.group.stop,
+        kmb,
+        citybus
+      });
+    });
+    citybusArrivals.forEach((citybus) => {
+      if (!usedCitybusGroups.has(citybus)) {
+        displayRows.push({
+          stop: citybus.group.stop,
+          kmb: null,
+          citybus
+        });
+      }
+    });
+
+    if (!displayRows.length) {
+      displayRows.push({
+        stop: { name_tc: `${DEFAULT_STOP} / Shek Mun` },
+        kmb: null,
+        citybus: null
+      });
+      issues.push(`Route ${route} has no matching 石門 stop in either operator's route data.`);
     }
 
-    const arrivalGroups = await Promise.all([...groups.values()].map(async (group) => {
-      const results = await Promise.allSettled(group.serviceTypes.map((serviceType) =>
-        fetchJson(`${KMB_API}/eta/${encodeURIComponent(group.stop.stop)}/${encodeURIComponent(route)}/${encodeURIComponent(serviceType)}`)
-      ));
-      const successful = results.filter((result) => result.status === "fulfilled")
-        .flatMap((result) => result.value.data || [])
-        .filter((eta) => eta.eta && eta.dir === group.bound && new Date(eta.eta).getTime() >= Date.now() - 30000)
-        .sort((first, second) => new Date(first.eta) - new Date(second.eta));
-      const uniqueEtas = successful.filter((eta, index, all) =>
-        all.findIndex((other) => other.eta === eta.eta && other.dest_tc === eta.dest_tc) === index
-      ).slice(0, 3);
-      const failed = results.every((result) => result.status === "rejected")
-        ? "Please refresh to try again."
-        : "";
-      return { group, etas: uniqueEtas, error: failed };
-    }));
-
     elements.busResults.replaceChildren();
-    arrivalGroups.forEach(({ group, etas, error }) => {
-      elements.busResults.append(makeBusCard(group, group.route, etas, error));
+    displayRows.forEach((row) => {
+      elements.busResults.append(makeBusCard(row, route));
     });
     localStorage.setItem("harbour-route", route);
+    setError(elements.busError, issues.length ? issues.join(" ") : "");
   } catch (error) {
     elements.busResults.replaceChildren();
     setError(elements.busError, `Bus arrivals could not be loaded: ${error.message}`);
   } finally {
     elements.searchButton.disabled = false;
   }
+}
+
+async function getCitybusStop(stopId) {
+  if (!citybusStopsById.has(stopId)) {
+    const request = fetchJson(`${CITYBUS_API}/stop/${encodeURIComponent(stopId)}`)
+      .catch((error) => {
+        citybusStopsById.delete(stopId);
+        throw error;
+      });
+    citybusStopsById.set(stopId, request);
+  }
+  return citybusStopsById.get(stopId);
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]);
+    }
+  }));
+  return results;
+}
+
+function distanceBetweenStops(first, second) {
+  const toRadians = (degrees) => degrees * Math.PI / 180;
+  const latitudeDifference = toRadians(Number(second.lat) - Number(first.lat));
+  const longitudeDifference = toRadians(Number(second.long) - Number(first.long));
+  const firstLatitude = toRadians(Number(first.lat));
+  const secondLatitude = toRadians(Number(second.lat));
+  const haversine = Math.sin(latitudeDifference / 2) ** 2
+    + Math.cos(firstLatitude) * Math.cos(secondLatitude) * Math.sin(longitudeDifference / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function isNearShekMun(stop, shekMunStops) {
+  if (stop.name_tc?.includes(DEFAULT_STOP) || stop.name_en?.toLowerCase().includes("shek mun")) return true;
+  return shekMunStops.some((anchor) => distanceBetweenStops(stop, anchor) <= 150);
+}
+
+function normalizeDestination(destination) {
+  return (destination || "").toLowerCase().replace(/station|站|[()（）\s-]/g, "");
+}
+
+function uniqueArrivalTimes(arrivals) {
+  return arrivals.filter((eta, index, all) =>
+    all.findIndex((other) => other.eta === eta.eta && other.dest_tc === eta.dest_tc) === index
+  ).slice(0, 3);
 }
 
 function refresh() {

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f5f7f4">
-    <meta name="description" content="Hong Kong weather forecasts and live KMB bus arrivals at Shek Mun.">
+    <meta name="description" content="Hong Kong weather forecasts and live KMB and Citybus arrivals at Shek Mun.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./app-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="./styles.css">
@@ -91,10 +91,10 @@
               <div>
                 <p class="eyebrow"><span class="section-number">02</span> THE WAY THERE</p>
                 <h2 id="bus-heading">Your bus, <span class="heading-muted">right on time.</span></h2>
-                <p class="section-intro">Live KMB arrivals at your stop in Shek Mun.</p>
+                <p class="section-intro">Live KMB and Citybus arrivals at stops in Shek Mun.</p>
               </div>
             </div>
-            <span class="bus-route-badge"><span class="bus-badge-icon" aria-hidden="true">↗</span> KMB · <span id="selected-route-label">680</span></span>
+            <span class="bus-route-badge"><span class="bus-badge-icon" aria-hidden="true">↗</span> 九巴 · 城巴 · <span id="selected-route-label">680</span></span>
           </div>
 
           <form class="route-search" id="route-form">
@@ -110,7 +110,7 @@
             </div>
             <button class="search-button" type="submit"><span>Find bus</span><span aria-hidden="true">→</span></button>
           </form>
-          <p class="form-hint">Enter a KMB route number to find its next arrivals at stops matching 石門.</p>
+          <p class="form-hint">Enter a route number to compare 九巴 and 城巴 arrivals at stops matching 石門.</p>
 
           <div class="bus-results" id="bus-results" aria-live="polite">
             <div class="bus-loading">
@@ -119,7 +119,7 @@
             </div>
           </div>
           <p class="section-error bus-error" id="bus-error" role="alert" hidden></p>
-          <p class="source-note">Live arrival data from the <a href="https://data.gov.hk/en-data/dataset/hk-td-tis_21-etakmb" target="_blank" rel="noreferrer">Transport Department / KMB</a>.</p>
+          <p class="source-note">Live arrival data from the <a href="https://data.gov.hk/en-data/dataset/hk-td-tis_21-etakmb" target="_blank" rel="noreferrer">KMB API</a> and the <a href="https://data.gov.hk/en-data/dataset/ctb-eta-transport-realtime-eta" target="_blank" rel="noreferrer">Citybus API</a>. A “--” means no arrival is currently reported.</p>
         </section>
       </main>
 

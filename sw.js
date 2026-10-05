@@ -1,4 +1,4 @@
-const CACHE_NAME = "my-love-yoanna-shell-v3";
+const CACHE_NAME = "my-love-yoanna-shell-v4";
 const APP_SHELL = [
   "./",
   "./index.html",
